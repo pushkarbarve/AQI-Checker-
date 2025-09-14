@@ -9,7 +9,7 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-API_KEY = os.getenv("AQICN")
+API_KEY = os.getenv("07ca77c255f3734e076653f673fae37953792eb3")
 API_URL_FEED = "https://api.waqi.info/feed/{city}/?token={token}"
 API_URL_SEARCH = "https://api.waqi.info/search/?keyword={keyword}&token={token}"
 
@@ -75,3 +75,4 @@ def suggest_stations():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
+
