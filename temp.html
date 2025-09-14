@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <base target="_self" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Air Quality Index (AQI) Checker</title>
+    <meta
+      name="description"
+      content="Check real-time air quality index for any city, view historical data, and get health recommendations"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+    <style>
+      body { background: linear-gradient(to top, #87ceeb, #ffffff); }
+      .aqi-badge { @apply px-3 py-1 rounded-full text-white font-medium text-sm; }
+      .leaflet-container { @apply h-80 w-full rounded-xl z-0; }
+      .chart-container { @apply bg-white p-4 rounded-xl shadow; }
+      .suggestions {
+        position: absolute;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 0.5rem;
+        margin-top: 2px;
+        max-height: 250px;
+        overflow-y: auto;
+        width: 100%;
+        z-index: 50;
+      }
+      .suggestions div {
+        padding: 8px 12px;
+        cursor: pointer;
+        color: #1D4ED8;
+      }
+      .suggestions div:hover {
+        background-color: #f0f0f0;
+        color: #2563EB;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-50 font-sans">
+    <!-- HEADER -->
+    <header class="bg-gradient-to-r from-blue-700 to-blue-500 text-white shadow-lg">
+      <div class="container mx-auto px-4 py-6">
+        <div class="flex flex-col md:flex-row justify-between items-center">
+          <div class="mb-6 md:mb-0">
+            <h1 class="text-3xl font-bold flex items-center">
+              <i class="fas fa-wind mr-3"></i>Air Care
+            </h1>
+            <p class="mt-2 opacity-90">Real-time air quality data and health recommendations</p>
+          </div>
+          <div class="flex items-center space-x-3 w-full md:w-auto relative">
+            <div class="relative w-full md:w-80">
+              <input
+                type="text"
+                id="citySearch"
+                placeholder="Search for a city..."
+                class="w-full py-3 px-4 pr-12 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                autocomplete="off"
+              />
+              <button id="searchBtn" class="absolute right-3 top-3 text-blue-600">
+                <i class="fas fa-search"></i>
+              </button>
+              <div id="suggestions" class="suggestions hidden"></div>
+            </div>
+            <button class="bg-white text-blue-600 font-semibold px-4 py-2 rounded-lg hover:bg-blue-100 transition">Login</button>
+            <button class="bg-blue-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-blue-700 transition">Sign Up</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN -->
+    <main class="container mx-auto px-4 py-8">
+      <!-- Current AQI Section -->
+      <section id="currentAqi" class="mb-12 bg-white rounded-xl shadow-lg p-6">
+        <div class="flex flex-col md:flex-row justify-between items-center">
+          <div class="mb-6 md:mb-0 md:w-1/2">
+            <h2 class="text-2xl font-bold text-gray-800 mb-2">Current Air Quality</h2>
+            <div class="flex items-center">
+              <div id="aqiValue" class="text-6xl font-bold mr-4">--</div>
+              <div>
+                <div id="aqiCategory" class="aqi-badge bg-gray-500">N/A</div>
+                <p id="cityName" class="text-gray-600 mt-2">Search for a city to see AQI data</p>
+              </div>
+            </div>
+            <div id="aqiDescription" class="mt-4 text-gray-700">
+              Air Quality Index information will appear here after searching for a city.
+            </div>
+          </div>
+          <div class="w-full md:w-1/2">
+            <div class="bg-gray-100 p-4 rounded-lg">
+              <h3 class="font-semibold text-lg mb-3">Health Recommendations</h3>
+              <div id="healthRecommendations" class="space-y-2">
+                <p class="text-gray-700">Search for a city to see personalized health recommendations</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Forecast & Map -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
+        <section class="chart-container">
+          <h2 class="text-xl font-bold text-gray-800 mb-4">AQI Forecast Trend</h2>
+          <canvas id="aqiChart"></canvas>
+        </section>
+        <section>
+          <h2 class="text-xl font-bold text-gray-800 mb-4">Monitoring Station Location</h2>
+          <div id="map" class="h-80 rounded-xl"></div>
+        </section>
+      </div>
+    </main>
+
+    <!-- SCRIPT -->
+    <script>
+      // --- Map Initialization ---
+      const map = L.map("map").setView([20, 0], 2);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      }).addTo(map);
+      let mapMarker;
+
+      // --- Chart.js Setup ---
+      const ctx = document.getElementById("aqiChart").getContext("2d");
+      let aqiChart = new Chart(ctx, {
+        type: "line",
+        data: { labels: [], datasets: [{ label: "Forecasted AQI", data: [], borderColor: "#0095e6", backgroundColor: "rgba(0, 149, 230, 0.1)", borderWidth: 3, pointBackgroundColor: "#0095e6", pointRadius: 5, tension: 0.3, fill: true }]},
+        options: { responsive: true, plugins: { legend: { display: false }, tooltip: { mode: "index", intersect: false }}, scales: { y: { beginAtZero: true, title: { display: true, text: "AQI Value (PM2.5)" }}}}
+      });
+
+      // --- Elements ---
+      const citySearch = document.getElementById("citySearch");
+      const searchBtn = document.getElementById("searchBtn");
+      const suggestionsBox = document.getElementById("suggestions");
+
+      // --- Suggest Stations ---
+      citySearch.addEventListener("input", async () => {
+        const query = citySearch.value.trim();
+        if (query.length < 3) {
+          suggestionsBox.classList.add("hidden");
+          return;
+        }
+        try {
+          const response = await fetch("/api/suggest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ city: query })
+          });
+          const stations = await response.json();
+
+          if (response.ok && stations.length > 0) {
+            suggestionsBox.innerHTML = "";
+            stations.forEach(station => {
+              const div = document.createElement("div");
+              div.textContent = `${station.station_name} (AQI: ${station.aqi})`;
+              div.onclick = () => {
+                citySearch.value = station.station_name;
+                suggestionsBox.classList.add("hidden");
+                updateCityData(station.station_name);
+              };
+              suggestionsBox.appendChild(div);
+            });
+            suggestionsBox.classList.remove("hidden");
+          } else {
+            suggestionsBox.innerHTML = "<div>No stations found</div>";
+            suggestionsBox.classList.remove("hidden");
+          }
+        } catch (err) {
+          console.error("Error fetching suggestions", err);
+        }
+      });
+
+      // --- Search Button ---
+      searchBtn.addEventListener("click", () => {
+        if (citySearch.value.trim() !== "") {
+          updateCityData(citySearch.value.trim());
+        }
+      });
+
+      // --- Fetch AQI ---
+      async function updateCityData(cityName) {
+        document.getElementById("aqiValue").innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        document.getElementById("cityName").textContent = "Loading...";
+        try {
+          const response = await fetch("/api/aqi", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ city: cityName }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Unknown error.");
+
+          const aqi = data.aqi || 0;
+          document.getElementById("aqiValue").textContent = aqi;
+          document.getElementById("cityName").textContent = data.city.name;
+
+          const aqiCategory = document.getElementById("aqiCategory");
+          aqiCategory.textContent = getAqiCategory(aqi);
+          aqiCategory.className = "aqi-badge " + getAqiBadgeClass(aqi);
+
+          document.getElementById("aqiDescription").textContent = getAqiDescription(aqi);
+          document.getElementById("healthRecommendations").innerHTML = getHealthRecommendations(aqi);
+
+          if (data.forecast?.daily?.pm25) {
+            const forecastData = data.forecast.daily.pm25.slice(0, 7);
+            aqiChart.data.labels = forecastData.map(d => new Date(d.day).toLocaleDateString("en-US", { weekday: "short" }));
+            aqiChart.data.datasets[0].data = forecastData.map(d => d.avg);
+            aqiChart.update();
+          }
+
+          if (data.city?.geo) {
+            const [lat, lng] = data.city.geo;
+            map.setView([lat, lng], 11);
+            if (mapMarker) mapMarker.remove();
+            mapMarker = L.marker([lat, lng]).addTo(map).bindPopup(`<b>${data.city.name}</b><br>AQI: ${aqi}`).openPopup();
+          }
+        } catch (error) {
+          document.getElementById("aqiValue").textContent = "--";
+          document.getElementById("cityName").textContent = "Error";
+          document.getElementById("aqiDescription").textContent = `Could not fetch data. ${error.message}`;
+        }
+      }
+
+      // --- Helpers ---
+      function getAqiCategory(aqi) {
+        if (aqi <= 50) return "Good";
+        if (aqi <= 100) return "Moderate";
+        if (aqi <= 150) return "Unhealthy for Sensitive Groups";
+        if (aqi <= 200) return "Unhealthy";
+        if (aqi <= 300) return "Very Unhealthy";
+        return "Hazardous";
+      }
+      function getAqiBadgeClass(aqi) {
+        if (aqi <= 50) return "bg-green-500";
+        if (aqi <= 100) return "bg-yellow-400 text-gray-800";
+        if (aqi <= 150) return "bg-orange-500";
+        if (aqi <= 200) return "bg-red-500";
+        if (aqi <= 300) return "bg-purple-600";
+        return "bg-pink-700";
+      }
+      function getAqiDescription(aqi) {
+        if (aqi <= 50) return "Air quality is considered satisfactory.";
+        if (aqi <= 100) return "Air quality is acceptable for most people.";
+        if (aqi <= 150) return "Members of sensitive groups may experience health effects.";
+        if (aqi <= 200) return "Everyone may begin to experience health effects.";
+        if (aqi <= 300) return "Health alert: Everyone may experience issues.";
+        return "Hazardous: Emergency conditions.";
+      }
+      function getHealthRecommendations(aqi) {
+        if (aqi <= 50) return "<p class='text-green-600'>Enjoy outdoor activities!</p>";
+        if (aqi <= 100) return "<p class='text-yellow-600'>Safe for most, sensitive groups should be cautious.</p>";
+        if (aqi <= 150) return "<p class='text-orange-600'>Limit prolonged outdoor exertion if sensitive.</p>";
+        if (aqi <= 200) return "<p class='text-red-600'>Everyone should reduce outdoor activity.</p>";
+        if (aqi <= 300) return "<p class='text-purple-600'>Avoid outdoor exertion, stay indoors.</p>";
+        return "<p class='text-pink-600'>Stay indoors, use air purifiers if available.</p>";
+      }
+
+      // Default city
+      setTimeout(() => updateCityData("Delhi"), 500);
+    </script>
+  </body>
+</html>
